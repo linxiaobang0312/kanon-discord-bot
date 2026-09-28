@@ -1,5 +1,6 @@
 import os
 import re
+import random
 import discord
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -55,6 +56,48 @@ CHAT_PROMPT = """
 - 回覆盡量 1～4 句，先講重點，再給下一步。
 - 不要自稱 ChatGPT、OpenAI 或語言模型。
 """
+
+
+SONGS = [
+    {"title": "Tiny Stars", "artist": "Liella!", "note": "這首很適合晚上戴耳機慢慢聽～"},
+    {"title": "START!! True dreams", "artist": "Liella!", "note": "很有出發感，想打起精神的時候很適合！"},
+    {"title": "未来予報ハレルヤ！", "artist": "Liella!", "note": "聽起來就會有一種『今天會變好』的感覺。"},
+    {"title": "WE WILL!!", "artist": "Liella!", "note": "想要來點有力量的，我會推這首！"},
+    {"title": "ビタミンSUMMER！", "artist": "Liella!", "note": "超有夏天感，心情低落的時候可以拿來補血～"},
+    {"title": "Day1", "artist": "Liella!", "note": "節奏很爽，想醒腦可以點這首。"},
+    {"title": "ノンフィクション!!", "artist": "Liella!", "note": "舞台感很強，氣勢直接拉滿！"},
+    {"title": "私のSymphony", "artist": "Liella!", "note": "這首比較像是慢慢把自己的心意唱出來。"},
+    {"title": "Wish Song", "artist": "Liella!", "note": "如果你今天想聽溫柔一點的，我會選這首。"},
+    {"title": "Sing! Shine! Smile!", "artist": "Liella!", "note": "很適合拿來當今天的元氣補充包！"},
+]
+
+def song_command(text: str):
+    raw = text.strip()
+    q = normalize(raw)
+
+    if q in ["點歌", "我要點歌", "想點歌"]:
+        song = random.choice(SONGS)
+        return f"可以呀～那我先幫你挑一首！🎧\n**{song['title']} — {song['artist']}**\n{song['note']}"
+
+    if q in ["隨機點歌", "隨機一首", "隨機歌", "抽一首"]:
+        song = random.choice(SONGS)
+        return f"抽到這首！🎶\n**{song['title']} — {song['artist']}**\n{song['note']}"
+
+    if q in ["香音推薦", "今天推薦", "推薦一首", "推薦歌", "香音今天推薦"]:
+        song = random.choice(SONGS)
+        return f"嗯……今天我想推這首！\n**{song['title']} — {song['artist']}**\n{song['note']}"
+
+    if q.startswith("點歌"):
+        wanted = raw[2:].strip(" ：:")
+        if not wanted:
+            song = random.choice(SONGS)
+            return f"好呀～那我先幫你挑一首！\n**{song['title']} — {song['artist']}**\n{song['note']}"
+        for song in SONGS:
+            if normalize(song["title"]) in normalize(wanted) or normalize(wanted) in normalize(song["title"]):
+                return f"收到～今天就點 **{song['title']} — {song['artist']}** 🎧\n{song['note']}"
+        return f"收到～你點的是 **{wanted}**！我先幫你記下來啦 🎶"
+
+    return None
 
 FAQS = [
     {
@@ -119,7 +162,7 @@ FAQS = [
     },
     {
         "keywords": ["幫助", "help", "功能", "你會什麼", "可以問什麼"],
-        "answer": "目前可以問我：平台怎麼用、找卡／篩選、交易車、交易流程、價格與庫存說明、面交、付款、議價，以及怎麼找筱邦。即時查卡功能還在施工中～"
+        "answer": "目前可以問我：平台怎麼用、找卡／篩選、交易車、交易流程、價格與庫存說明、面交、付款、議價，以及怎麼找筱邦。也可以輸入「點歌」、「隨機點歌」或「香音推薦」陪我玩一下～即時查卡功能還在施工中！"
     },
 ]
 
@@ -161,6 +204,11 @@ async def on_message(message: discord.Message):
 
     if not user_text:
         await message.reply("我在～有什麼需要幫忙的嗎？輸入「@香音 幫助」可以看我目前會的功能。")
+        return
+
+    song_reply = song_command(user_text)
+    if song_reply:
+        await message.reply(song_reply)
         return
 
     answer = find_faq(user_text)
