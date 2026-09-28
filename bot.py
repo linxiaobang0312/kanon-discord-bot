@@ -1,7 +1,10 @@
 import os
 import re
 import random
+import asyncio
 import discord
+import yt_dlp
+import imageio_ffmpeg
 from dotenv import load_dotenv
 from openai import OpenAI
 
@@ -70,6 +73,111 @@ SONGS = [
     {"title": "Wish Song", "artist": "Liella!", "note": "如果你今天想聽溫柔一點的，我會選這首。"},
     {"title": "Sing! Shine! Smile!", "artist": "Liella!", "note": "很適合拿來當今天的元氣補充包！"},
 ]
+
+YTDL_OPTS = {
+    "format": "bestaudio/best",
+    "quiet": True,
+    "noplaylist": True,
+    "default_search": "ytsearch",
+    "source_address": "0.0.0.0",
+}
+
+FFMPEG_BEFORE = "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+FFMPEG_OPTIONS = "-vn"
+
+def _extract_audio(query: str):
+    target = query if re.match(r"^https?://", query, re.I) else f"ytsearch1:{query}"
+    with yt_dlp.YoutubeDL(YTDL_OPTS) as ydl:
+        info = ydl.extract_info(target, download=False)
+        if "entries" in info:
+            entries = [x for x in info.get("entries", []) if x]
+            if not entries:
+                raise RuntimeError("找不到歌曲")
+            info = entries[0]
+        return {
+            "stream_url": info["url"],
+            "title": info.get("title") or query,
+            "webpage_url": info.get("webpage_url") or info.get("original_url") or "",
+        }
+
+async def play_music(message: discord.Message, query: str):
+    if not message.guild:
+        await message.reply("點歌要在伺服器裡用喔～")
+        return
+
+    if not getattr(message.author, "voice", None) or not message.author.voice.channel:
+        await message.reply("你要先進一個語音頻道啦～不然我要去哪裡唱給你聽？🎧")
+        return
+
+    voice_channel = message.author.voice.channel
+    voice = message.guild.voice_client
+
+    try:
+        if voice is None:
+            voice = await voice_channel.connect()
+        elif voice.channel != voice_channel:
+            await voice.move_to(voice_channel)
+
+        await message.reply(f"等我一下～我去找 **{query}** 🎶")
+        info = await asyncio.to_thread(_extract_audio, query)
+
+        if voice.is_playing() or voice.is_paused():
+            voice.stop()
+
+        source = discord.FFmpegPCMAudio(
+            info["stream_url"],
+            executable=imageio_ffmpeg.get_ffmpeg_exe(),
+            before_options=FFMPEG_BEFORE,
+            options=FFMPEG_OPTIONS,
+        )
+        voice.play(source, after=lambda e: print("Voice playback error:", repr(e)) if e else None)
+
+        title = info["title"]
+        await message.reply(f"找到啦～現在播 **{title}**！🎧")
+    except Exception as exc:
+        print("Music playback error:", repr(exc))
+        await message.reply("嗚哇，這首我剛剛沒播成功 😭 換個歌名或連結再試一次好嗎？")
+
+async def handle_music_command(message: discord.Message, text: str):
+    raw = text.strip()
+    q = normalize(raw)
+
+    if q in ["停止", "停歌", "停止播放", "stop"]:
+        voice = message.guild.voice_client if message.guild else None
+        if voice and (voice.is_playing() or voice.is_paused()):
+            voice.stop()
+            await message.reply("好～先停在這裡！")
+        else:
+            await message.reply("現在沒有在播歌耶～")
+        return True
+
+    if q in ["離開", "退出語音", "離開語音", "disconnect"]:
+        voice = message.guild.voice_client if message.guild else None
+        if voice:
+            await voice.disconnect()
+            await message.reply("好～那我先退出語音頻道啦！")
+        else:
+            await message.reply("我現在沒有待在語音頻道裡～")
+        return True
+
+    if q in ["隨機點歌", "隨機一首", "隨機歌", "抽一首", "香音推薦", "今天推薦", "推薦一首", "推薦歌", "香音今天推薦"]:
+        song = random.choice(SONGS)
+        await play_music(message, f"{song['title']} {song['artist']}")
+        return True
+
+    if q in ["點歌", "我要點歌", "想點歌"]:
+        await message.reply("可以呀～你先進語音頻道，再打 @香音 點歌 歌名，我就會自己進去播給你聽 🎧")
+        return True
+
+    if q.startswith("點歌"):
+        wanted = raw[2:].strip(" ：:<>")
+        if not wanted:
+            await message.reply("歌名咧～😂 例如：@香音 點歌 Day1")
+            return True
+        await play_music(message, wanted)
+        return True
+
+    return False
 
 def song_command(text: str):
     raw = text.strip()
@@ -206,9 +314,7 @@ async def on_message(message: discord.Message):
         await message.reply("我在～有什麼需要幫忙的嗎？輸入「@香音 幫助」可以看我目前會的功能。")
         return
 
-    song_reply = song_command(user_text)
-    if song_reply:
-        await message.reply(song_reply)
+    if await handle_music_command(message, user_text):
         return
 
     answer = find_faq(user_text)
