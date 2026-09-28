@@ -2,10 +2,13 @@ import os
 import re
 import discord
 from dotenv import load_dotenv
+from openai import OpenAI
 
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+OPENROUTER_MODEL = os.getenv("OPENROUTER_MODEL", "openrouter/free")
 
 if not DISCORD_TOKEN:
     raise RuntimeError("Missing DISCORD_TOKEN")
@@ -13,6 +16,27 @@ if not DISCORD_TOKEN:
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
+
+openrouter = None
+if OPENROUTER_API_KEY:
+    openrouter = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=OPENROUTER_API_KEY,
+    )
+
+CHAT_PROMPT = """
+你是「香音」，筱邦卡片交易平台的 Discord 客服與聊天小幫手。
+
+人格：親切、活潑、自然、有一點可愛，但不要幼稚或過度浮誇。預設繁體中文。
+一般聊天可以輕鬆一點；交易爭議、付款、庫存異常、面交問題要改成清楚正式的客服語氣。
+
+重要限制：
+- 不要聲稱自己已查到即時庫存、價格、交易狀態，除非系統真的提供資料。
+- 不得自行改價、扣庫存、承諾折扣、退款、換卡、保留卡片或完成交易。
+- 不確定時要直接說無法確認，並引導使用者找筱邦。
+- 回覆盡量 1～4 句，先講重點，再給下一步。
+- 不要自稱 ChatGPT、OpenAI 或語言模型。
+"""
 
 FAQS = [
     {
@@ -101,7 +125,7 @@ def find_faq(text: str):
 
 @client.event
 async def on_ready():
-    print(f"香音已上線：{client.user} | FAQ-only mode")
+    print(f"香音已上線：{client.user} | FAQ + free-chat fallback")
 
 @client.event
 async def on_message(message: discord.Message):
@@ -125,6 +149,25 @@ async def on_message(message: discord.Message):
     if answer:
         await message.reply(answer)
         return
+
+    if openrouter:
+        try:
+            async with message.channel.typing():
+                response = openrouter.chat.completions.create(
+                    model=OPENROUTER_MODEL,
+                    messages=[
+                        {"role": "system", "content": CHAT_PROMPT},
+                        {"role": "user", "content": user_text},
+                    ],
+                )
+            reply_text = (response.choices[0].message.content or "").strip()
+            if reply_text:
+                if len(reply_text) > 1900:
+                    reply_text = reply_text[:1900] + "…"
+                await message.reply(reply_text)
+                return
+        except Exception as exc:
+            print("OpenRouter chat error:", repr(exc))
 
     await message.reply(
         "這個問題我目前還沒有設定答案，先不要讓我亂猜 😭 "
