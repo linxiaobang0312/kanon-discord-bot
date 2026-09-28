@@ -1,3 +1,6 @@
 discord.py>=2.5,<3
 python-dotenv>=1.0,<2
 openai>=1.100
+PyNaCl>=1.5,<2
+yt-dlp>=2026.1.1
+imageio-ffmpeg>=0.6,<1
