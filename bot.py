@@ -279,6 +279,45 @@ def normalize(text: str) -> str:
     text = re.sub(r"\s+", "", text)
     return text
 
+def looks_like_bad_model_output(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return True
+    compact = t.lower().replace(" ", "")
+    # 過短的分類／系統標籤不是正常角色回覆。
+    if len(t) <= 40 and ":" in t and (t.lower().startswith("user") or t.lower().startswith("assistant")):
+        return True
+    if compact in {"safe", "unsafe", "ok", "pass", "allow", "deny"}:
+        return True
+    return False
+
+def _chat_once(user_text: str):
+    return openrouter.chat.completions.create(
+        model=OPENROUTER_MODEL,
+        messages=[
+            {"role": "system", "content": CHAT_PROMPT},
+            {"role": "user", "content": user_text},
+        ],
+    )
+
+async def get_chat_reply(user_text: str):
+    if not openrouter:
+        return None
+    for attempt in range(2):
+        try:
+            response = await asyncio.wait_for(
+                asyncio.to_thread(_chat_once, user_text),
+                timeout=15,
+            )
+            text = (response.choices[0].message.content or "").strip()
+            if not looks_like_bad_model_output(text):
+                return text
+            print("Ignored malformed model reply:", repr(text))
+        except asyncio.TimeoutError:
+            print("OpenRouter chat timeout")
+        except Exception as exc:
+            print("OpenRouter chat error:", repr(exc))
+    return None
 def find_faq(text: str):
     q = normalize(text)
     best_answer = None
@@ -322,28 +361,17 @@ async def on_message(message: discord.Message):
         await message.reply(answer)
         return
 
-    if openrouter:
-        try:
-            async with message.channel.typing():
-                response = openrouter.chat.completions.create(
-                    model=OPENROUTER_MODEL,
-                    messages=[
-                        {"role": "system", "content": CHAT_PROMPT},
-                        {"role": "user", "content": user_text},
-                    ],
-                )
-            reply_text = (response.choices[0].message.content or "").strip()
-            if reply_text:
-                if len(reply_text) > 1900:
-                    reply_text = reply_text[:1900] + "…"
-                await message.reply(reply_text)
-                return
-        except Exception as exc:
-            print("OpenRouter chat error:", repr(exc))
+    async with message.channel.typing():
+        reply_text = await get_chat_reply(user_text)
+
+    if reply_text:
+        if len(reply_text) > 1900:
+            reply_text = reply_text[:1900] + "…"
+        await message.reply(reply_text)
+        return
 
     await message.reply(
-        "這個問題我目前還沒有設定答案，先不要讓我亂猜 😭 "
-        "你可以問我「幫助」看目前支援的問題，或直接找筱邦確認。"
+        "欸？我剛剛好像短暫斷線了一下 😭 你再叫我一次，我還在這裡～"
     )
 
 client.run(DISCORD_TOKEN)
