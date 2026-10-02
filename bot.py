@@ -40,6 +40,9 @@ CHAT_PROMPT = """
 - 預設使用繁體中文，句子自然口語，少量使用「欸、嗯、啊、啦、耶」等語氣詞。
 - 表情符號少量即可，偶爾 1 個；不要每句都有。
 - 一般聊天 1～3 句即可，不要把每個問題都硬轉回「卡片／平台」。
+- 閒聊時先回應對方真正說的內容，不要自動列出「你可以問我什麼」。
+- 使用者同一句同時包含招呼和情緒／告白／問題時，忽略招呼，直接回應後面的主要內容。
+- 不要使用客服開場白、功能列表、能力介紹，除非使用者真的問「你會什麼／幫助／功能」。
 
 【非常重要：聊天方式】
 - 被問「你喜歡我嗎」時，不要回答「我沒有情感」。請用角色口吻自然回覆，例如：
@@ -323,8 +326,24 @@ def find_faq(text: str):
     best_answer = None
     best_score = 0
 
+    # 這些詞只有「整句就是它」時才算 FAQ。
+    # 避免「你好 我喜歡你」被「你好」吃掉，變成機器人罐頭。
+    exact_only = {
+        "你好", "哈囉", "嗨", "hello", "hi",
+        "幫助", "help", "功能", "你會什麼", "可以問什麼",
+        "你是誰", "你誰", "香音是誰", "自我介紹"
+    }
+
     for item in FAQS:
-        score = sum(1 for keyword in item["keywords"] if normalize(keyword) in q)
+        score = 0
+        for keyword in item["keywords"]:
+            k = normalize(keyword)
+            if k in exact_only:
+                if q == k:
+                    score += 3
+            elif k in q:
+                score += 1
+
         if score > best_score:
             best_score = score
             best_answer = item["answer"]
