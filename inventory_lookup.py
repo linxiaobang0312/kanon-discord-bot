@@ -71,8 +71,8 @@ def fetch_cards(query):
     with urlopen(Request(url, headers=headers, method="GET"), timeout=7) as resp:
         if "json" not in resp.headers.get("Content-Type", ""):
             raise ValueError("Not JSON")
-        raw = resp.read(1048577)
-    if len(raw) > 1048576:
+        raw = resp.read(8 * 1024 * 1024 + 1)
+    if len(raw) > 8 * 1024 * 1024:
         raise ValueError("API payload too large")
     payload = json.loads(raw)
     if isinstance(payload, list):
@@ -90,11 +90,11 @@ def fetch_cards(query):
 
 def format_card(card):
     code = field(card, "card_number", "card_no", "cardNo", "number", "sku")
-    name = field(card, "card_name", "cardName", "name", "title")
+    name = field(card, "display_name", "custom_name", "card_name", "cardName", "name", "official_name", "title")
     variant = field(card, "variant", "version", "rarity")
     if code is None and name is None:
         return None
-    quantity = number(field(card, "available_quantity", "availableQuantity", "available_qty",
+    quantity = number(field(card, "quantity", "available_quantity", "availableQuantity", "available_qty",
                             "saleable_quantity", "saleableQuantity"), whole=True)
     price = number(field(card, "unit_price", "unitPrice", "price"))
     currency = str(field(card, "currency", "currency_code") or "TWD").upper()
@@ -122,7 +122,7 @@ async def answer_product_question(message):
         if not isinstance(card, dict):
             continue
         values = (field(card, "card_number", "card_no", "cardNo", "number", "sku"),
-                  field(card, "card_name", "cardName", "name", "title"))
+                  field(card, "display_name", "custom_name", "card_name", "cardName", "name", "official_name", "title"))
         if any(key in re.sub(r"\s+", "", str(v)).casefold() for v in values if v is not None):
             text = format_card(card)
             if text:
