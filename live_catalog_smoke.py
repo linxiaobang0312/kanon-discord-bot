@@ -27,3 +27,24 @@ try:
         print("LIVE_CATALOG related_public_name_matches=%d" % len(names))
 except Exception as exc:
     print("LIVE_CATALOG diagnostic_failure=%s" % type(exc).__name__)
+
+
+print("TEXT_SEARCH smoke:")
+for query in ("請問還有跟澀谷香音相關的卡牌嗎", "有沒有澀谷香音的卡片？", "渋谷かのん庫存"):
+    try:
+        term = inventory.extract_card_term(query)
+        versions = inventory.search_variants(term) if term else set()
+        related = []
+        for item in items:
+            if isinstance(item, dict) and inventory.match_card(item, versions):
+                related.append(item)
+        live = [c for c in related if (inventory.number(c.get("quantity"), whole=True) or 0) > 0]
+        print("TEXT_SEARCH query_type=%s term=%s found=%d in_stock=%d" % (
+            "cn" if "澀" in query else "jp", term, len(related), len(live)))
+        for card in live[:3]:
+            print("TEXT_SEARCH sample code=%s name=%s stock=%s price=%s" % (
+                str(card.get("number", ""))[:40],
+                str(card.get("display_name") or card.get("official_name") or "")[:70],
+                str(card.get("quantity", ""))[:10], str(card.get("price", ""))[:20]))
+    except Exception as exc:
+        print("TEXT_SEARCH error=%s" % type(exc).__name__)
