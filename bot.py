@@ -7,6 +7,7 @@ import yt_dlp
 import imageio_ffmpeg
 from dotenv import load_dotenv
 from openai import OpenAI
+from inventory_lookup import is_product_query, answer_product_question
 
 load_dotenv()
 
@@ -373,6 +374,13 @@ async def on_message(message: discord.Message):
         return
 
     if await handle_music_command(message, user_text):
+        return
+
+    # 商品資訊一律由網站即時唯讀 API 決定，不交給 FAQ 或 AI 猜測。
+    if is_product_query(user_text):
+        async with message.channel.typing():
+            product_reply = await answer_product_question(user_text)
+        await message.reply(product_reply, mention_author=False, allowed_mentions=discord.AllowedMentions.none())
         return
 
     answer = find_faq(user_text)
