@@ -60,7 +60,7 @@ def fetch_cards(query):
     p = urlsplit(url)
     if p.scheme != "https" or not p.hostname or p.username or p.password:
         raise ValueError("Invalid API endpoint")
-    headers = {"Accept": "application/json"}
+    headers = {"Accept": "application/json", "User-Agent": "KanonCustomerBot/1.0"}
     token = os.getenv("CARD_SEARCH_API_TOKEN", "").strip()
     if token:
         headers["Authorization"] = "Bearer " + token
