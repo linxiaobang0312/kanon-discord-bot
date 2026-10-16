@@ -25,7 +25,7 @@ def is_product_query(message):
         return True
     return bool(
         re.search(r"(?:相關|有關).{0,5}(?:卡牌|卡片|成員卡|live卡|卡|商品)", text)
-        or re.search(r"(?:有沒有|還有|想找|想買|查詢|找找|幫我找|幫我查).{1,48}(?:卡牌|卡片|成員卡|live卡)", text)
+        or re.search(r"(?:有沒有|還有|想找|我想找|想買|查詢|找|搜索|搜尋|找找|幫我找|幫我查).{1,48}(?:卡牌|卡片|成員卡|live卡)", text)
         or re.search(r"(?:卡牌|卡片|成員卡|live卡).{0,12}(?:有哪些|有嗎|還有嗎|有賣)", text)
     )
 
