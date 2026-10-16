@@ -40,6 +40,12 @@ class InventoryTests(unittest.TestCase):
             "PL!HS-pb1-007-P+",
         )
 
+    def test_howto_faq_not_intercepted(self):
+        self.assertFalse(lookup.is_product_query("怎麼找卡"))
+        self.assertFalse(lookup.is_product_query("價格怎麼看"))
+        self.assertFalse(lookup.is_product_query("庫存怎麼看"))
+        self.assertTrue(lookup.is_product_query("瑠璃乃庫存"))
+
     def test_chat_not_intercepted(self):
         self.assertFalse(lookup.is_product_query("你好，我喜歡你"))
 
