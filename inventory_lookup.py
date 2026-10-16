@@ -54,16 +54,12 @@ def safe(value):
     return re.sub(r"([\\*_~>|])", r"\\\1", value)
 
 def fetch_cards(query):
-    endpoint = os.getenv("CARD_SEARCH_API_URL", "").strip()
-    p = urlsplit(endpoint)
+    # 現有 GET /api/cards 只支援完整清單；添加 q/limit 會觸發 HTTP 錯誤。
+    # 只請求公開完整清單；由 answer_product_question 在本機依卡號/名稱篩選。
+    url = os.getenv("CARD_SEARCH_API_URL", "").strip()
+    p = urlsplit(url)
     if p.scheme != "https" or not p.hostname or p.username or p.password:
         raise ValueError("Invalid API endpoint")
-    param = os.getenv("CARD_SEARCH_QUERY_PARAM", "q")
-    if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,30}", param):
-        raise ValueError("Invalid search parameter")
-    qs = [(k, v) for k, v in parse_qsl(p.query) if k not in (param, "limit")]
-    qs.extend([(param, query), ("limit", "20")])
-    url = urlunsplit((p.scheme, p.netloc, p.path, urlencode(qs), ""))
     headers = {"Accept": "application/json"}
     token = os.getenv("CARD_SEARCH_API_TOKEN", "").strip()
     if token:
