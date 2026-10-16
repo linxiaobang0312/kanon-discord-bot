@@ -87,6 +87,7 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(lookup.extract_card_term(question), "澀谷香音")
         self.assertTrue(lookup.is_product_query("有沒有澀谷香音的卡片？"))
         self.assertTrue(lookup.is_product_query("找有關渋谷かのん的卡牌"))
+        self.assertEqual(lookup.extract_card_term("找有關渋谷かのん的卡牌"), "渋谷かのん")
         self.assertFalse(lookup.is_product_query("你喜歡澀谷香音嗎？"))
         self.assertFalse(lookup.is_product_query("香音今天心情好嗎"))
 
