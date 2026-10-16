@@ -7,8 +7,10 @@ from urllib.request import Request, urlopen
 MISSING_CARD = "想查哪一張卡呢？請提供卡號或卡名，我才能確認是哪個版本～"
 NOT_CONNECTED = "商品即時查詢還沒完成連線，現在不能確認價格和庫存，請找筱邦確認。"
 FAILED = "目前連不上最新商品資料，價格和庫存我不能亂猜，請稍後再試或找筱邦確認。"
-HINTS = ("這張還有", "還有嗎", "有貨嗎", "有沒有貨", "還有貨", "庫存", "剩幾",
-         "剩多少", "可售", "查卡", "找卡", "查商品", "多少錢", "價格", "價錢", "售價", "現貨")
+HINTS = ("這張還有", "還有嗎", "還有幾", "有幾件", "有幾張", "有幾隻", "還剩幾",
+         "幾件", "幾張", "幾隻", "幾個", "幾盒", "有貨嗎", "有沒有貨", "還有貨",
+         "庫存", "剩幾", "剩多少", "可售", "查卡", "找卡", "查商品",
+         "多少錢", "價格", "價錢", "售價", "現貨", "買得到嗎", "有賣嗎")
 CODE = re.compile(r"(?<!\w)[A-Za-z0-9!+]+(?:-[A-Za-z0-9!+]+){2,}(?!\w)")
 SIMPLE = {"", "這張", "那張", "卡片", "卡", "商品", "什麼", "llocg"}
 
@@ -19,7 +21,7 @@ def is_product_query(message):
              "價格怎麼看", "庫存怎麼看", "怎麼操作", "怎麼使用")
     if any(phrase in text for phrase in howto):
         return False
-    return any(word in text for word in HINTS)
+    return bool(CODE.search(message or "")) or any(word in text for word in HINTS)
 
 def extract_card_term(message):
     raw = (message or "").strip()
@@ -28,12 +30,17 @@ def extract_card_term(message):
         return found.group(0)
     text = re.sub(r"<@!?\d+>", "", raw)
     text = re.sub(r"^(?:香音|請問|麻煩|不好意思|幫我|我想問)+[，：:\s]*", "", text)
-    text = re.sub(r"(?:這張|那張)?(?:卡片|卡|商品)?(?:目前)?"
-                  r"(?:還有嗎|還有貨嗎|還有|有貨嗎|有沒有貨|剩幾張|剩多少|多少錢|價格|價錢|售價|庫存|現貨|可售|查卡|找卡|查商品)",
+    text = re.sub(r"(?:這個|那個|這張|那張)?(?:商品|玩具|卡片|卡)?(?:目前)?"
+                  r"(?:還有幾(?:隻|件|張|個|盒)?|還剩幾(?:隻|件|張|個|盒)?|有幾(?:隻|件|張|個|盒)?"
+                  r"|還有嗎|還有貨嗎|還有|有貨嗎|有沒有貨|剩幾(?:隻|件|張|個|盒)?"
+                  r"|剩多少|多少錢|價格|價錢|售價|庫存|現貨|可售|查卡|找卡|查商品|買得到嗎|有賣嗎)",
                   " ", text)
     text = re.sub(r"(?:我想買|想買|幫我查|幫我找|有嗎|嗎|呢|呀|啊|？|\?|！|!)+", " ", text)
     text = " ".join(text.strip(" ，,。:：『』「」()（）<>").split())
     if text.lower().replace(" ", "") in SIMPLE or len(text) < 2:
+        return None
+    # 沒有指向具體商品的代名詞不能當商品名稱拿去搜尋。
+    if re.fullmatch(r"(?:這|那)(?:個|張)?(?:商品|玩具|卡片|卡)?", text):
         return None
     return text[:100]
 
@@ -90,7 +97,7 @@ def fetch_cards(query):
     raise ValueError("Unknown API result format")
 
 def format_card(card):
-    code = field(card, "card_number", "card_no", "cardNo", "number", "sku")
+    code = field(card, "card_number", "card_no", "cardNo", "number", "sku", "id")
     name = field(card, "display_name", "custom_name", "card_name", "cardName", "name", "official_name", "title")
     variant = field(card, "variant", "version", "rarity")
     if code is None and name is None:
@@ -99,11 +106,17 @@ def format_card(card):
                             "saleable_quantity", "saleableQuantity"), whole=True)
     price = number(field(card, "unit_price", "unitPrice", "price"))
     currency = str(field(card, "currency", "currency_code") or "TWD").upper()
+    section = str(field(card, "section_name", "section") or "")
+    product_type = str(field(card, "card_type", "type") or "")
+    code_text = str(code or "")
+    # 其他玩具在網站是「件」，卡牌則是「張」。
+    unit = "件" if (code_text.upper().startswith("XB-")
+                 or "玩具" in section or product_type == "商品") else "張"
     price_text = "未提供" if price is None else (
         ("NT$" if currency in ("TWD", "NTD") else safe(currency) + " ") +
-        (format(price, ",.0f") if price == price.to_integral_value() else format(price, ",.2f")) + "/張"
+        (format(price, ",.0f") if price == price.to_integral_value() else format(price, ",.2f")) + "/" + unit
     )
-    stock_text = "未提供（需人工確認）" if quantity is None else ("已無庫存" if quantity == 0 else str(quantity) + " 張")
+    stock_text = "未提供（需人工確認）" if quantity is None else ("已無庫存" if quantity == 0 else str(quantity) + " " + unit)
     title = "｜".join(safe(v) for v in (code, name, variant) if v is not None)
     return "**" + title + "**\n可售：" + stock_text + "｜價格：" + price_text
 
@@ -122,8 +135,10 @@ async def answer_product_question(message):
     for card in cards:
         if not isinstance(card, dict):
             continue
-        values = (field(card, "card_number", "card_no", "cardNo", "number", "sku"),
-                  field(card, "display_name", "custom_name", "card_name", "cardName", "name", "official_name", "title"))
+        values = tuple(field(card, k) for k in (
+            "card_number", "card_no", "cardNo", "number", "sku", "id",
+            "display_name", "custom_name", "card_name", "cardName",
+            "name", "official_name", "title"))
         if any(key in re.sub(r"\s+", "", str(v)).casefold() for v in values if v is not None):
             text = format_card(card)
             if text:
