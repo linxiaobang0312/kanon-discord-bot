@@ -1,5 +1,5 @@
 """Public read-only product search for the Kanon Discord bot."""
-import os, re, json, asyncio
+import os, re, json, asyncio, unicodedata
 from decimal import Decimal, InvalidOperation
 from urllib.parse import urlencode, urlsplit, urlunsplit, parse_qsl
 from urllib.request import Request, urlopen
@@ -16,20 +16,34 @@ SIMPLE = {"", "這張", "那張", "卡片", "卡", "商品", "什麼", "llocg"}
 
 def is_product_query(message):
     text = (message or "").replace(" ", "").lower()
-    # 教學類 FAQ 不應誤判成要查某張商品的庫存。
+    # 平台操作教學不是商品搜尋；普通聊天也不應被「香音」這個角色名攔截。
     howto = ("怎麼找卡", "如何找卡", "怎麼搜尋", "如何搜尋",
              "價格怎麼看", "庫存怎麼看", "怎麼操作", "怎麼使用")
     if any(phrase in text for phrase in howto):
         return False
-    return bool(CODE.search(message or "")) or any(word in text for word in HINTS)
+    if CODE.search(message or "") or any(word in text for word in HINTS):
+        return True
+    return bool(
+        re.search(r"(?:相關|有關).{0,5}(?:卡牌|卡片|成員卡|live卡|卡|商品)", text)
+        or re.search(r"(?:有沒有|還有|想找|想買|查詢|找找|幫我找|幫我查).{1,48}(?:卡牌|卡片|成員卡|live卡)", text)
+        or re.search(r"(?:卡牌|卡片|成員卡|live卡).{0,12}(?:有哪些|有嗎|還有嗎|有賣)", text)
+    )
 
 def extract_card_term(message):
     raw = (message or "").strip()
     found = CODE.search(raw)
     if found:
         return found.group(0)
-    text = re.sub(r"<@!?\d+>", "", raw)
-    text = re.sub(r"^(?:香音|請問|麻煩|不好意思|幫我|我想問)+[，：:\s]*", "", text)
+    text = re.sub(r"<@!?\d+>", "", raw).strip()
+    # 「香音」可能是稱呼 Bot，也可能就是在找角色「澀谷香音」，不能無條件刪掉。
+    text = re.sub(r"^香音[，,！!：:\s]+", "", text)
+    text = re.sub(r"^香音(?=(?:這張|這個|那張|請問))", "", text)
+    text = re.sub(r"^(?:(?:請問|麻煩|不好意思|我想問|想問|可以幫我|幫我)[，,：:\s]*)+", "", text)
+    # 「請問還有跟澀谷香音相關的卡牌嗎？」→「澀谷香音」
+    text = re.sub(r"(?:相關|有關)(?:的)?(?:卡牌|卡片|成員卡|卡|商品)(?:嗎|呢|呀)?[？?！!]*$", "", text)
+    text = re.sub(r"(?:的)?(?:卡牌|卡片|成員卡|商品)(?:還有嗎|有嗎|有哪些|嗎|呢)?[？?！!]*$", "", text)
+    text = re.sub(r"^(?:(?:還有|有沒有|是否還有|有|想找|想買|我要買|幫我找|幫我查|查詢|搜尋|搜索|找找|找|查)[，,：:\s]*)+", "", text)
+    text = re.sub(r"^(?:跟|和|與|關於|有關|相關)[，,：:\s]*", "", text)
     text = re.sub(r"(?:這個|那個|這張|那張)?(?:商品|玩具|卡片|卡)?(?:目前)?"
                   r"(?:還有幾(?:隻|件|張|個|盒)?|還剩幾(?:隻|件|張|個|盒)?|有幾(?:隻|件|張|個|盒)?"
                   r"|還有嗎|還有貨嗎|還有|有貨嗎|有沒有貨|剩幾(?:隻|件|張|個|盒)?"
@@ -39,10 +53,53 @@ def extract_card_term(message):
     text = " ".join(text.strip(" ，,。:：『』「」()（）<>").split())
     if text.lower().replace(" ", "") in SIMPLE or len(text) < 2:
         return None
-    # 沒有指向具體商品的代名詞不能當商品名稱拿去搜尋。
     if re.fullmatch(r"(?:這|那)(?:個|張)?(?:商品|玩具|卡片|卡)?", text):
         return None
     return text[:100]
+
+# 受控別名：用戶的繁中名稱與網站可能採用的日文／羅馬名稱對照。
+# 搜尋結果仍必須由實際 API 商品名稱匹配，不能憑角色知識捏造卡片。
+ALIASES = {
+    "澀谷香音": (
+        "澀谷香音", "澁谷香音", "渋谷香音", "涩谷香音",
+        "澀谷かのん", "澁谷かのん", "渋谷かのん", "しぶやかのん",
+        "shibuyakanon", "kanonshibuya", "香音", "かのん",
+    )
+}
+
+def compact(value):
+    value = unicodedata.normalize("NFKC", str(value or "")).casefold()
+    return re.sub(r"[\s　・･·_\-／/]+", "", value)
+
+def search_variants(term):
+    needle = compact(term)
+    result = {needle}
+    for names in ALIASES.values():
+        if needle in {compact(name) for name in names}:
+            result.update(compact(name) for name in names)
+    return {value for value in result if len(value) >= 2}
+
+def match_card(card, variants):
+    """Return grounded relevance; only names, code and public category are inspected."""
+    keys = ("card_number", "card_no", "cardNo", "number", "sku", "id",
+            "display_name", "custom_name", "card_name", "cardName",
+            "name", "official_name", "title")
+    best = 0
+    for key in keys:
+        value = compact(card.get(key))
+        if not value:
+            continue
+        for wanted in variants:
+            if wanted == value:
+                best = max(best, 100 if key in keys[:6] else 90)
+            elif wanted in value:
+                best = max(best, 80 if key in keys[:6] else 70)
+    # 團體、系列支援文字檢索，但相關程度比角色／卡名低。
+    for key in ("group_name", "series", "section_name"):
+        value = compact(card.get(key))
+        if value and any(wanted in value for wanted in variants):
+            best = max(best, 35)
+    return best
 
 def field(row, *keys):
     for k in keys:
@@ -130,22 +187,50 @@ async def answer_product_question(message):
         cards, more = await asyncio.wait_for(asyncio.to_thread(fetch_cards, term), timeout=9)
     except Exception:
         return FAILED
-    key = re.sub(r"\s+", "", term).casefold()
-    lines = []
+
+    variants = search_variants(term)
+    matches = []
     for card in cards:
         if not isinstance(card, dict):
             continue
-        values = tuple(field(card, k) for k in (
-            "card_number", "card_no", "cardNo", "number", "sku", "id",
-            "display_name", "custom_name", "card_name", "cardName",
-            "name", "official_name", "title"))
-        if any(key in re.sub(r"\s+", "", str(v)).casefold() for v in values if v is not None):
-            text = format_card(card)
-            if text:
-                lines.append(text)
-    if not lines:
-        return "目前查不到符合「" + safe(term) + "」的公開商品資料，可以提供完整卡號或卡名嗎？"
-    result = "找到以下商品版本：\n\n" + "\n\n".join(lines[:5])
-    if len(lines) > 5 or more:
-        result += "\n\n還有其他版本，請給我更完整的卡號。"
+        score = match_card(card, variants)
+        if score:
+            formatted = format_card(card)
+            if formatted:
+                amount = number(field(card, "quantity", "available_quantity", "availableQuantity",
+                                      "available_qty", "saleable_quantity", "saleableQuantity"), whole=True)
+                matches.append((card, score, amount, formatted))
+
+    if not matches:
+        return "我查了目前公開上架的資料，但沒有找到與「" + safe(term) + "」符合的商品。可以試試其他角色名、日文名稱或卡號喔～"
+
+    # 相關卡片優先展示有庫存的版本；零庫存與未知庫存不能被算成現貨。
+    matches.sort(key=lambda item: (item[2] is not None and item[2] > 0,
+                                   item[1], item[2] if item[2] is not None else -1), reverse=True)
+    stocked = sum(1 for _, _, qty, _ in matches if qty is not None and qty > 0)
+    unknown = sum(1 for _, _, qty, _ in matches if qty is None)
+    if stocked:
+        intro = ("找到與「" + safe(term) + "」相關的 " + str(len(matches))
+                 + " 個商品版本，其中 " + str(stocked) + " 個有現貨：")
+    elif unknown:
+        intro = ("找到與「" + safe(term) + "」相關的 " + str(len(matches))
+                 + " 個商品版本，但目前沒有可確認的現貨：")
+    else:
+        intro = ("找到與「" + safe(term) + "」相關的 " + str(len(matches))
+                 + " 個商品版本，目前都顯示沒有現貨：")
+
+    # 輸出長度受 Discord 限制；逐筆保留版本與價格，絕不附內部連結。
+    selected = []
+    max_rows = 5
+    for _, _, _, description in matches:
+        if len(selected) >= max_rows:
+            break
+        draft = intro + "\n\n" + "\n\n".join(selected + [description])
+        if len(draft) > 1650:
+            break
+        selected.append(description)
+    result = intro + "\n\n" + "\n\n".join(selected)
+    if len(matches) > len(selected) or more:
+        result += ("\n\n只列出前 " + str(len(selected))
+                   + " 個版本，想縮小範圍可以再給我卡號、版本或更完整的名稱。")
     return result[:1850]
