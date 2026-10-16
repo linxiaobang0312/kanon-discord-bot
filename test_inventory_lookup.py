@@ -30,6 +30,57 @@ class InventoryTests(unittest.TestCase):
         self.assertEqual(len(cards), 1)
         self.assertFalse(more)
 
+    def test_real_customer_query_routes_to_inventory(self):
+        question = "XB-518ae91b-3cf 這個商品還有幾隻"
+        self.assertTrue(lookup.is_product_query(question))
+        self.assertEqual(lookup.extract_card_term(question), "XB-518ae91b-3cf")
+        self.assertTrue(lookup.is_product_query("XB-518ae91b-3cf"))
+        self.assertTrue(lookup.is_product_query("櫻坂雫X高咲侑還有幾件"))
+        self.assertFalse(lookup.is_product_query("香音，你今天心情如何？"))
+
+    def test_missing_code_prompts_for_item(self):
+        self.assertTrue(lookup.is_product_query("這個商品還有幾隻？"))
+        self.assertIsNone(lookup.extract_card_term("這個商品還有幾隻？"))
+        with patch.dict(os.environ, {"CARD_SEARCH_API_URL": "https://example.org/api/cards"}):
+            reply = asyncio.run(lookup.answer_product_question("這個商品還有幾隻？"))
+        self.assertIn("卡號或卡名", reply)
+
+    def test_other_toy_exact_id_live_lookup(self):
+        records = [
+            {"id": "id-one", "number": "XB-518ae91b-3cf",
+             "display_name": "櫻坂雫X高咲侑", "section_name": "其他玩具",
+             "card_type": "商品", "quantity": 1, "price": 70,
+             "admin_url": "https://hidden.example.org/admin"},
+        ]
+        with patch.dict(os.environ, {"CARD_SEARCH_API_URL": "https://example.org/api/cards"}):
+            with patch.object(lookup, "fetch_cards", return_value=(records, False)):
+                reply = asyncio.run(lookup.answer_product_question("XB-518ae91b-3cf 這個商品還有幾隻"))
+        self.assertIn("XB-518ae91b-3cf", reply)
+        self.assertIn("櫻坂雫X高咲侑", reply)
+        self.assertIn("1 件", reply)
+        self.assertIn("NT$70/件", reply)
+        self.assertNotIn("/admin", reply)
+        self.assertNotIn("hidden.example.org", reply)
+
+    def test_other_toy_partial_name_lookup(self):
+        records = [
+            {"number": "XB-518ae91b-3cf", "display_name": "櫻坂雫X高咲侑",
+             "quantity": 1, "price": 70},
+        ]
+        with patch.dict(os.environ, {"CARD_SEARCH_API_URL": "https://example.org/api/cards"}):
+            with patch.object(lookup, "fetch_cards", return_value=(records, False)):
+                reply = asyncio.run(lookup.answer_product_question("高咲侑還有幾件"))
+        self.assertIn("XB-518ae91b-3cf", reply)
+        self.assertIn("1 件", reply)
+
+    def test_match_public_id_when_number_missing(self):
+        records = [{"id": "XB-518ae91b-3cf", "display_name": "櫻坂雫X高咲侑",
+                    "quantity": 1, "price": 70}]
+        with patch.dict(os.environ, {"CARD_SEARCH_API_URL": "https://example.org/api/cards"}):
+            with patch.object(lookup, "fetch_cards", return_value=(records, False)):
+                reply = asyncio.run(lookup.answer_product_question("XB-518ae91b-3cf 有貨嗎"))
+        self.assertIn("1 件", reply)
+
     def test_reference_without_card_identifier(self):
         self.assertTrue(lookup.is_product_query("香音這張還有嗎？"))
         self.assertIsNone(lookup.extract_card_term("香音這張還有嗎？"))
