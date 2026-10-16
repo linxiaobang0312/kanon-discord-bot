@@ -5,6 +5,31 @@ from unittest.mock import patch
 import inventory_lookup as lookup
 
 class InventoryTests(unittest.TestCase):
+
+    def test_fetch_uses_unmodified_get_endpoint(self):
+        import json
+        response = json.dumps({
+            "cards": [{"number": "PL!HS-pb1-007-P+", "display_name": "示例",
+                       "quantity": 2, "price": 70, "rarity": "P+"}],
+            "series": [], "sections": [], "admin": {}
+        }).encode("utf-8")
+
+        class FakeResponse:
+            headers = {"Content-Type": "application/json"}
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, limit): return response
+
+        url = "https://example.org/api/cards"
+        with patch.dict(os.environ, {"CARD_SEARCH_API_URL": url}):
+            with patch.object(lookup, "urlopen", return_value=FakeResponse()) as mock:
+                cards, more = lookup.fetch_cards("PL!HS-pb1-007-P+")
+                req = mock.call_args.args[0]
+        self.assertEqual(req.full_url, url)
+        self.assertEqual(req.get_method(), "GET")
+        self.assertEqual(len(cards), 1)
+        self.assertFalse(more)
+
     def test_reference_without_card_identifier(self):
         self.assertTrue(lookup.is_product_query("香音這張還有嗎？"))
         self.assertIsNone(lookup.extract_card_term("香音這張還有嗎？"))
