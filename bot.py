@@ -7,7 +7,7 @@ import yt_dlp
 import imageio_ffmpeg
 from dotenv import load_dotenv
 from openai import OpenAI
-from inventory_lookup import is_product_query, answer_product_question, probe_card_api, fetch_cards
+from inventory_lookup import is_product_query, answer_product_question
 
 load_dotenv()
 
@@ -351,27 +351,9 @@ def find_faq(text: str):
 
     return best_answer
 
-_catalog_probe_started = False
-
-async def _probe_catalog_once():
-    result = await asyncio.to_thread(probe_card_api)
-    print("Catalog API schema probe:", result)
-    try:
-        records, more = await asyncio.to_thread(fetch_cards, "PL!HS-pb1-007-P+")
-        matches = [v for v in records if isinstance(v, dict)
-                   and "PL!HS-pb1-007-P+".casefold() in str(v.get("number", "")).casefold()]
-        print("Card API search probe: items=%d matching_card_count=%d more=%s" %
-              (len(records), len(matches), more))
-    except Exception as exc:
-        print("Card API search probe failed:", type(exc).__name__)
-
 @client.event
 async def on_ready():
-    global _catalog_probe_started
-    print(f"香音已上線：{client.user} | FAQ + free-chat fallback")
-    if not _catalog_probe_started and os.getenv("CARD_SEARCH_API_URL"):
-        _catalog_probe_started = True
-        asyncio.create_task(_probe_catalog_once())
+    print(f"香音已上線：{client.user} | FAQ + free-chat + inventory")
 
 @client.event
 async def on_message(message: discord.Message):
