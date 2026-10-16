@@ -138,9 +138,7 @@ def probe_card_api():
     p = urlsplit(endpoint)
     if p.scheme != "https" or not p.hostname:
         return "not configured"
-    params = list(parse_qsl(p.query, keep_blank_values=True))
-    params.append(("limit", "1"))
-    url = urlunsplit((p.scheme, p.netloc, p.path, urlencode(params), ""))
+    url = endpoint
     headers = {"Accept": "application/json", "User-Agent": "KanonCustomerBot/1.0"}
     token = os.getenv("CARD_SEARCH_API_TOKEN", "").strip()
     if token:
