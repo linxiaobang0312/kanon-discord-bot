@@ -14,6 +14,11 @@ SIMPLE = {"", "這張", "那張", "卡片", "卡", "商品", "什麼", "llocg"}
 
 def is_product_query(message):
     text = (message or "").replace(" ", "").lower()
+    # 教學類 FAQ 不應誤判成要查某張商品的庫存。
+    howto = ("怎麼找卡", "如何找卡", "怎麼搜尋", "如何搜尋",
+             "價格怎麼看", "庫存怎麼看", "怎麼操作", "怎麼使用")
+    if any(phrase in text for phrase in howto):
+        return False
     return any(word in text for word in HINTS)
 
 def extract_card_term(message):
@@ -129,45 +134,3 @@ async def answer_product_question(message):
     if len(lines) > 5 or more:
         result += "\n\n還有其他版本，請給我更完整的卡號。"
     return result[:1850]
-
-
-def probe_card_api():
-    """Diagnostic for deployment logs. Print schema/type names only, never item values."""
-    from urllib.error import HTTPError, URLError
-    endpoint = os.getenv("CARD_SEARCH_API_URL", "").strip()
-    p = urlsplit(endpoint)
-    if p.scheme != "https" or not p.hostname:
-        return "not configured"
-    url = endpoint
-    headers = {"Accept": "application/json", "User-Agent": "KanonCustomerBot/1.0"}
-    token = os.getenv("CARD_SEARCH_API_TOKEN", "").strip()
-    if token:
-        headers["Authorization"] = "Bearer " + token
-    try:
-        with urlopen(Request(url, headers=headers, method="GET"), timeout=9) as resp:
-            status = resp.status
-            content_type = resp.headers.get("Content-Type", "")
-            raw = resp.read(3 * 1024 * 1024 + 1)
-        if len(raw) > 3 * 1024 * 1024:
-            return "status=%d too-large body" % status
-        doc = json.loads(raw)
-        keys = sorted(doc.keys())[:30] if isinstance(doc, dict) else []
-        candidates = [doc] if isinstance(doc, dict) else []
-        while candidates:
-            value = candidates.pop(0)
-            if isinstance(value, list):
-                if value and isinstance(value[0], dict):
-                    return "status=%d type=%s root_keys=%s item_keys=%s count=%d" % (
-                        status, content_type, keys, sorted(value[0].keys())[:60], len(value))
-            elif isinstance(value, dict):
-                for key in ("data", "items", "cards", "products", "results", "list"):
-                    if key in value:
-                        candidates.append(value[key])
-        return "status=%d type=%s root_type=%s root_keys=%s (no sample)" % (
-            status, content_type, type(doc).__name__, keys)
-    except HTTPError as exc:
-        return "HTTP error %d" % exc.code
-    except URLError as exc:
-        return "network error: %s" % type(exc.reason).__name__
-    except (ValueError, OSError) as exc:
-        return "probe parse/network error: %s" % type(exc).__name__
