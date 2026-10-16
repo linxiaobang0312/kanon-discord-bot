@@ -81,6 +81,56 @@ class InventoryTests(unittest.TestCase):
                 reply = asyncio.run(lookup.answer_product_question("XB-518ae91b-3cf 有貨嗎"))
         self.assertIn("1 件", reply)
 
+    def test_natural_language_card_discovery(self):
+        question = "請問還有跟澀谷香音相關的卡牌嗎"
+        self.assertTrue(lookup.is_product_query(question))
+        self.assertEqual(lookup.extract_card_term(question), "澀谷香音")
+        self.assertTrue(lookup.is_product_query("有沒有澀谷香音的卡片？"))
+        self.assertTrue(lookup.is_product_query("找有關渋谷かのん的卡牌"))
+        self.assertFalse(lookup.is_product_query("你喜歡澀谷香音嗎？"))
+        self.assertFalse(lookup.is_product_query("香音今天心情好嗎"))
+
+    def test_character_alias_search_in_api_names(self):
+        cards = [
+            {"number": "PL-001-R", "display_name": "渋谷かのん", "rarity": "R",
+             "quantity": 2, "price": 30},
+            {"number": "PL-001-PE+", "official_name": "澁谷かのん",
+             "display_name": "Love Live! 卡片", "rarity": "PE+",
+             "quantity": 1, "price": 180},
+            {"number": "PL-002-R", "display_name": "唐可可",
+             "quantity": 7, "price": 40}
+        ]
+        with patch.dict(os.environ, {"CARD_SEARCH_API_URL": "https://example.org/api/cards"}):
+            with patch.object(lookup, "fetch_cards", return_value=(cards, False)):
+                result = asyncio.run(lookup.answer_product_question("請問還有跟澀谷香音相關的卡牌嗎"))
+        self.assertIn("渋谷かのん", result)
+        self.assertIn("PL-001-PE+", result)
+        self.assertIn("2 張", result)
+        self.assertIn("1 張", result)
+        self.assertIn("NT$180", result)
+        self.assertNotIn("唐可可", result)
+
+    def test_discovery_prefers_in_stock_and_separates_out_of_stock(self):
+        cards = [
+            {"number": "PL-002-R", "display_name": "渋谷かのん", "quantity": 0, "price": 10},
+            {"number": "PL-002-P", "display_name": "渋谷かのん", "quantity": 3, "price": 90},
+        ]
+        with patch.dict(os.environ, {"CARD_SEARCH_API_URL": "https://example.org/api/cards"}):
+            with patch.object(lookup, "fetch_cards", return_value=(cards, False)):
+                result = asyncio.run(lookup.answer_product_question("還有跟澀谷香音相關的卡牌嗎"))
+        self.assertIn("其中 1 個有現貨", result)
+        self.assertLess(result.index("PL-002-P"), result.index("PL-002-R"))
+        self.assertIn("已無庫存", result)
+
+    def test_dont_confuse_missing_stock_with_available(self):
+        with patch.dict(os.environ, {"CARD_SEARCH_API_URL": "https://example.org/api/cards"}):
+            with patch.object(lookup, "fetch_cards", return_value=([
+                {"number": "PL-003", "name": "渋谷かのん", "quantity": None, "price": 50}
+            ], False)):
+                result = asyncio.run(lookup.answer_product_question("澀谷香音的卡牌"))
+        self.assertIn("沒有可確認的現貨", result)
+        self.assertIn("未提供（需人工確認）", result)
+
     def test_reference_without_card_identifier(self):
         self.assertTrue(lookup.is_product_query("香音這張還有嗎？"))
         self.assertIsNone(lookup.extract_card_term("香音這張還有嗎？"))
