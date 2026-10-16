@@ -7,7 +7,7 @@ import yt_dlp
 import imageio_ffmpeg
 from dotenv import load_dotenv
 from openai import OpenAI
-from inventory_lookup import is_product_query, answer_product_question
+from inventory_lookup import is_product_query, answer_product_question, probe_card_api
 
 load_dotenv()
 
@@ -351,9 +351,19 @@ def find_faq(text: str):
 
     return best_answer
 
+_catalog_probe_started = False
+
+async def _probe_catalog_once():
+    result = await asyncio.to_thread(probe_card_api)
+    print("Catalog API schema probe:", result)
+
 @client.event
 async def on_ready():
+    global _catalog_probe_started
     print(f"香音已上線：{client.user} | FAQ + free-chat fallback")
+    if not _catalog_probe_started and os.getenv("CARD_SEARCH_API_URL"):
+        _catalog_probe_started = True
+        asyncio.create_task(_probe_catalog_once())
 
 @client.event
 async def on_message(message: discord.Message):
