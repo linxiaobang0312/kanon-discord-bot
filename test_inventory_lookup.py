@@ -54,6 +54,45 @@ class InventoryTests(unittest.TestCase):
         self.assertIn("不能亂猜", reply)
         self.assertNotIn("已無庫存", reply)
 
+
+    def test_real_site_api_schema(self):
+        """/api/cards returns a dict with cards list; number, display_name, quantity, price, rarity."""
+        payload = {
+            "admin": {"private": "NOT FOR CUSTOMERS"},
+            "cards": [
+                {"number": "PL!HS-pb1-007-P+", "display_name": "瑠璃乃",
+                 "quantity": 2, "price": 160, "rarity": "P+",
+                 "import_source_url": "https://example.org/internal"}
+            ],
+            "sections": [], "series": []
+        }
+        cards, more = lookup.fetch_cards.__globals__["json"].loads(
+            lookup.fetch_cards.__globals__["json"].dumps(payload)
+        )["cards"], False
+        self.assertFalse(more)
+        rendered = lookup.format_card(cards[0])
+        self.assertIn("瑠璃乃", rendered)
+        self.assertIn("P+", rendered)
+        self.assertIn("2 張", rendered)
+        self.assertIn("NT$160/張", rendered)
+        self.assertNotIn("import_source_url", rendered)
+        self.assertNotIn("example.org", rendered)
+
+    def test_readonly_site_payload_multiple_rarities(self):
+        cards = [
+            {"number": "PL!HS-pb1-007-P+", "display_name": "瑠璃乃", "rarity": "P+", "quantity": 1, "price": 500},
+            {"number": "PL!HS-pb1-007-R", "display_name": "瑠璃乃", "rarity": "R", "quantity": 0, "price": 30},
+        ]
+        with patch.dict(os.environ, {"CARD_SEARCH_API_URL": "https://example.org/api/cards"}):
+            with patch.object(lookup, "fetch_cards", return_value=(cards, False)):
+                reply = asyncio.run(lookup.answer_product_question("瑠璃乃庫存"))
+        self.assertIn("P+", reply)
+        self.assertIn("R", reply)
+        self.assertIn("1 張", reply)
+        self.assertIn("已無庫存", reply)
+        self.assertIn("NT$500", reply)
+        self.assertIn("NT$30", reply)
+
     def test_query_has_no_exposed_metadata(self):
         card = {"card_no": "PL!HS-pb1-007-P+", "card_name": "小香",
                 "available_quantity": 3, "unit_price": 200,
