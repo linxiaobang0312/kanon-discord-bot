@@ -7,7 +7,7 @@ import yt_dlp
 import imageio_ffmpeg
 from dotenv import load_dotenv
 from openai import OpenAI
-from inventory_lookup import is_product_query, answer_product_question, probe_card_api
+from inventory_lookup import is_product_query, answer_product_question, probe_card_api, fetch_cards
 
 load_dotenv()
 
@@ -356,6 +356,14 @@ _catalog_probe_started = False
 async def _probe_catalog_once():
     result = await asyncio.to_thread(probe_card_api)
     print("Catalog API schema probe:", result)
+    try:
+        records, more = await asyncio.to_thread(fetch_cards, "PL!HS-pb1-007-P+")
+        matches = [v for v in records if isinstance(v, dict)
+                   and "PL!HS-pb1-007-P+".casefold() in str(v.get("number", "")).casefold()]
+        print("Card API search probe: items=%d matching_card_count=%d more=%s" %
+              (len(records), len(matches), more))
+    except Exception as exc:
+        print("Card API search probe failed:", type(exc).__name__)
 
 @client.event
 async def on_ready():
